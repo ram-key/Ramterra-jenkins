@@ -1,0 +1,170 @@
+ terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 3.0"
+    }
+  }
+}
+# Configure AWS provider
+provider "aws" {
+  region = "ap-south-1"
+}
+
+# Create VPC
+
+resource "aws_vpc" "MYVPC" {
+  cidr_block       = "10.0.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name = "MYVPC"
+  }
+}
+
+# create subnet (PUBLIC)
+
+resource "aws_subnet" "MYPUBSUB" {
+  vpc_id     = aws_vpc.MYVPC.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "ap-south-1a"
+  tags = {
+    Name = "MYPUBSUB"
+  }
+}
+
+# create subnet (PRIVATE)
+
+resource "aws_subnet" "MYPRISUB" {
+  vpc_id     = aws_vpc.MYVPC.id
+  cidr_block = "10.0.2.0/24"
+  availability_zone = "ap-south-1b"
+  tags = {
+    Name = "MYPRISUB"
+  }
+}
+
+# Create Internet Gateway
+
+resource "aws_internet_gateway" "tigw" {
+  vpc_id = aws_vpc.MYVPC.id
+
+  tags = {
+    Name = "MY-VPC-IGW"
+  }
+}
+
+# create route table (public RT)
+
+resource "aws_route_table" "PUBRT" {
+  vpc_id = aws_vpc.MYVPC.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.tigw.id
+  } 
+ 
+  tags = {
+    Name = "MY-VPC-PUB-RT"
+  }
+}
+
+# Create route table assosiation (Public)
+
+resource "aws_route_table_association" "PUBRTASSO" {
+  subnet_id      = aws_subnet.MYPUBSUB.id
+  route_table_id = aws_route_table.PUBRT.id
+}
+
+# Create Elastic IP 
+
+resource "aws_eip" "TEIP" {
+  vpc      = true
+}
+
+# Create Natgate way
+
+resource "aws_nat_gateway" "TNAT" {
+  allocation_id = aws_eip.TEIP.id
+  subnet_id     = aws_subnet.MYPUBSUB.id
+
+  tags = {
+    Name = "MY-VPC-NAT"
+  }
+
+  # Create Private route table
+
+  resource "aws_route_table" "PRIRT" {
+  vpc_id = aws_vpc.MYVPC.id
+
+  route {
+    cidr_block = "10.0.1.0/24"
+    gateway_id = aws_internet_gateway.tigw.id
+  }
+ 
+  tags = {
+    Name = "MY-VPC-PRI-RT"
+  }
+}
+
+# Create route table assosiation (Private)
+
+resource "aws_route_table_association" "PRIRTASSO" {
+  subnet_id      = aws_subnet.MYPRISUB.id
+  route_table_id = aws_route_table.PRIRT.id
+}
+
+# Create Security Group 
+
+resource "aws_security_group" "allow_all" {
+  name        = "allow_all"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.MYVPC.id
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "allow_all"
+  }
+}
+# Create Instance
+
+resource "aws_instance" "instance1" {
+  ami = "ami-06a0b4e3b7eb7a300"
+  instance_type               =  "t2.micro"  
+  subnet_id                   =  aws_subnet.MYPUBSUB.id
+  key_name                    =  "nov17"
+  vpc_security_group_ids      =  ["${aws_security_group.allow_all.id}"]
+  associate_public_ip_address =  true
+}
+
+resource "aws_instance" "instance2" {
+  ami                         = "ami-06a0b4e3b7eb7a300"
+  instance_type               =  "t2.micro"  
+  subnet_id                   =  aws_subnet.MYPRISUB.id
+  key_name                    =  "nov17"
+  vpc_security_group_ids      =  ["${aws_security_group.allow_all.id}"]
+}
+
+
